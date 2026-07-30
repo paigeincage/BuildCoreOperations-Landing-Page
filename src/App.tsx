@@ -11,7 +11,25 @@ import {
 const COMPANY = "BuildCore"
 const PRODUCT = "The Condenser"
 const APP_URL = "https://condenser-unified-production.up.railway.app/"
-const API_URL = "https://condenser-app-production.up.railway.app"
+const API_URL = "https://condenser-unified-production.up.railway.app"
+const WAITLIST_ERROR = "We couldn't save your email. Please try again."
+
+async function submitWaitlist(email: string, source: "phone_demo" | "founding_user_cta") {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 10_000)
+
+  try {
+    const response = await fetch(`${API_URL}/api/waitlist`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: email.trim(), source }),
+      signal: controller.signal,
+    })
+    if (!response.ok) throw new Error(`Waitlist request failed with ${response.status}`)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
 
 /* ── Reveal ── */
 function Reveal({ children, className = "" }: { children: React.ReactNode; className?: string }) {
@@ -134,6 +152,8 @@ export default function App() {
   const [showHint, setShowHint] = useState(true)
   const [selectedChannel, setSelectedChannel] = useState("")
   const [annual, setAnnual] = useState(false)
+  const [waitlistSubmitting, setWaitlistSubmitting] = useState(false)
+  const [waitlistError, setWaitlistError] = useState("")
 
   const progressPercent = Math.min((checkedItems.size / COMPLETE_THRESHOLD) * 100, 100)
   const isComplete = checkedItems.size >= COMPLETE_THRESHOLD
@@ -147,25 +167,55 @@ export default function App() {
     if (showExport || showGate) return
     if (showHint) setShowHint(false)
     const next = new Set(checkedItems)
-    next.has(id) ? next.delete(id) : next.add(id)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
     setCheckedItems(next)
     if (next.size >= COMPLETE_THRESHOLD && !showExport) setTimeout(() => setShowExport(true), 600)
   }
   function handleSendClick(channel: string) {
     setSelectedChannel(channel)
+    setWaitlistError("")
     if (emailSubmitted) {
       setShowExport(false); fireConfetti()
       setTimeout(() => setShowSentConfirm(true), 300)
       setTimeout(() => setShowSentConfirm(false), 3500)
     } else setShowGate(true)
   }
-  function handleDemoEmailSubmit(e: React.FormEvent) {
+  async function handleDemoEmailSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!demoEmail.trim()) return
-    setEmailSubmitted(true); setShowGate(false); setShowExport(false); fireConfetti()
-    setTimeout(() => setShowSentConfirm(true), 300)
-    setTimeout(() => setShowSentConfirm(false), 4000)
-    try { fetch(`${API_URL}/api/waitlist`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: demoEmail, source: "phone_demo" }) }); } catch {}
+    if (!demoEmail.trim() || waitlistSubmitting) return
+    setWaitlistSubmitting(true)
+    setWaitlistError("")
+    try {
+      await submitWaitlist(demoEmail, "phone_demo")
+      setEmailSubmitted(true); setShowGate(false); setShowExport(false); fireConfetti()
+      setTimeout(() => setShowSentConfirm(true), 300)
+      setTimeout(() => setShowSentConfirm(false), 4000)
+    } catch {
+      setWaitlistError(WAITLIST_ERROR)
+    } finally {
+      setWaitlistSubmitting(false)
+    }
+  }
+
+  async function handleFoundingEmailSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (waitlistSubmitting) return
+    const form = new FormData(e.currentTarget)
+    const email = String(form.get("email") ?? "").trim()
+    if (!email) return
+
+    setWaitlistSubmitting(true)
+    setWaitlistError("")
+    try {
+      await submitWaitlist(email, "founding_user_cta")
+      setDemoEmail(email)
+      setEmailSubmitted(true)
+    } catch {
+      setWaitlistError(WAITLIST_ERROR)
+    } finally {
+      setWaitlistSubmitting(false)
+    }
   }
 
   useEffect(() => {
@@ -292,8 +342,9 @@ export default function App() {
                       <p className="font-display text-sm font-bold uppercase tracking-wide text-white">Ready to send via {selectedChannel === "imessage" ? "iMessage" : selectedChannel === "sms" ? "SMS" : "Email"}</p>
                       <p className="mt-1 text-[10px] text-text-secondary">Enter your email to unlock one-tap export.</p>
                       <form onSubmit={handleDemoEmailSubmit} className="mt-3">
-                        <input type="email" value={demoEmail} onChange={e => setDemoEmail(e.target.value)} placeholder="your@email.com" className="w-full rounded-lg border border-white/10 bg-dark-card px-3 py-2.5 text-[11px] text-white placeholder-neutral-600 outline-none transition focus:border-copper" autoFocus />
-                        <button type="submit" className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-copper px-3 py-2.5 font-display text-[11px] font-bold uppercase tracking-wide text-white transition hover:bg-copper-light"><Zap size={12} /> Unlock & Send</button>
+                        <input type="email" required value={demoEmail} onChange={e => { setDemoEmail(e.target.value); setWaitlistError("") }} disabled={waitlistSubmitting} placeholder="your@email.com" className="w-full rounded-lg border border-white/10 bg-dark-card px-3 py-2.5 text-[11px] text-white placeholder-neutral-600 outline-none transition focus:border-copper disabled:opacity-60" autoFocus />
+                        <button type="submit" disabled={waitlistSubmitting} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg bg-copper px-3 py-2.5 font-display text-[11px] font-bold uppercase tracking-wide text-white transition hover:bg-copper-light disabled:cursor-wait disabled:opacity-60"><Zap size={12} /> {waitlistSubmitting ? "Saving…" : "Unlock & Send"}</button>
+                        {waitlistError && <p role="alert" className="mt-2 text-[9px] font-semibold text-red-300">{waitlistError}</p>}
                       </form>
                       <p className="mt-2 font-mono text-[8px] text-text-muted">Free early access &middot; No credit card</p>
                     </div>
@@ -524,13 +575,14 @@ export default function App() {
                     <p className="mt-1 text-sm text-text-on-light-2">We'll reach out soon with your early access invite.</p>
                   </motion.div>
                 ) : (
-                  <form onSubmit={async (e) => { e.preventDefault(); const fd = new FormData(e.currentTarget); const email = fd.get("email") as string; if (!email) return; setEmailSubmitted(true); setDemoEmail(email); try { await fetch(`${API_URL}/api/waitlist`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, source: "founding_user_cta" }) }); } catch {} }} className="mx-auto flex max-w-md flex-col gap-3 sm:flex-row">
-                    <input type="email" name="email" required placeholder="your@email.com" className="flex-1 rounded-lg border border-light-border bg-light px-4 py-3.5 text-sm text-text-on-light placeholder-neutral-400 outline-none transition focus:border-copper" />
-                    <button type="submit" className="inline-flex items-center justify-center gap-2 rounded-lg bg-copper px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-copper-light hover:shadow-[0_0_24px_rgba(196,90,44,0.4)]">
-                      Claim Your Spot <ArrowRight size={14} />
+                  <form onSubmit={handleFoundingEmailSubmit} className="mx-auto flex max-w-md flex-col gap-3 sm:flex-row">
+                    <input type="email" name="email" required onChange={() => setWaitlistError("")} disabled={waitlistSubmitting} placeholder="your@email.com" className="flex-1 rounded-lg border border-light-border bg-light px-4 py-3.5 text-sm text-text-on-light placeholder-neutral-400 outline-none transition focus:border-copper disabled:opacity-60" />
+                    <button type="submit" disabled={waitlistSubmitting} className="inline-flex items-center justify-center gap-2 rounded-lg bg-copper px-6 py-3.5 text-sm font-semibold text-white transition hover:bg-copper-light hover:shadow-[0_0_24px_rgba(196,90,44,0.4)] disabled:cursor-wait disabled:opacity-60">
+                      {waitlistSubmitting ? "Saving…" : "Claim Your Spot"} <ArrowRight size={14} />
                     </button>
                   </form>
                 )}
+                {!emailSubmitted && waitlistError && <p role="alert" className="mt-3 text-sm font-semibold text-red-700">{waitlistError}</p>}
               </div>
               <p className="mt-4 font-mono text-xs text-text-on-light-muted">Limited spots · No credit card required</p>
             </div>
