@@ -10,7 +10,7 @@ import {
 
 const COMPANY = "BuildCore"
 const PRODUCT = "The Condenser"
-const APP_URL = "https://condenser-app-production.up.railway.app/home"
+const APP_URL = "https://condenser-unified-production.up.railway.app/"
 const API_URL = "https://condenser-app-production.up.railway.app"
 
 /* ── Reveal ── */
